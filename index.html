@@ -7,7 +7,7 @@
   <title>LG전자 ES에너지컨설팅팀 위험성 평가표 (모바일 표 Ver.)</title>
 
   <style>
-    /* ===== 기본 테마(기존 유지) ===== */
+    /* ===== 기본 테마 (기존 유지) ===== */
     @font-face{
       font-family: "LG스마트체";
       src: url("LGSmartRegular.woff2") format("woff2"),
@@ -89,7 +89,7 @@
       width:100%; min-height:40px; border:1px solid var(--border); border-radius:8px; background:#fff; font-family:inherit; font-size:inherit;
       padding:6px 8px; outline:none; white-space:pre-wrap; word-break:break-word; overflow-wrap:break-word; resize:vertical;
     }
-    /* 보완대책 드롭셀/사용자입력 UI */
+    /* 보완대책 */
     .miti-cell{ padding:6px !important; }
     .miti-ui{ display:flex; flex-direction:column; gap:6px; }
     .miti-select, .miti-user{
@@ -170,7 +170,7 @@
         <div class="toolbar-left">
           <button id="clearAll" class="warn" type="button">초기화</button>
           <button id="btnShareCapture" class="secondary" type="button" title="전체 화면을 캡쳐하여 공유">캡쳐공유</button>
-          <!--  기존 유지: 캡쳐공유 오른쪽에 Update -->
+          <!-- 기존 유지: 캡쳐공유 오른쪽에 Update -->
           <button id="btnUpdate" class="secondary" type="button" title="페이지 새로고침">Update</button>
         </div>
       </div>
@@ -643,22 +643,29 @@
 
     /* ========= D. 캡쳐/공유 ========= */
 
-    //  고화질 스케일 계산: DPR 2~3 우선, 캔버스 안전 상한(15,000px) 내로 자동 조정
+    //  고화질 스케일 계산(업그레이드): 최소 가로 3600px 확보, DPR 우선, 최대 캔버스 안전치 고려
     function getContentWidth(doc){
       const de = doc.documentElement, bo = doc.body;
       return Math.max(de.scrollWidth, bo.scrollWidth, de.clientWidth, bo.clientWidth);
     }
     function computeHiResScale(limitBottomCss){
       const dpr = window.devicePixelRatio || 1;
-      let scale = Math.max(2, Math.min(3, dpr)); // 고화질 보장 (최소 2, 최대 3)
-      const maxCanvasDim = 15000; // Safari(16384) 고려 여유치
-      const cw = getContentWidth(document);
+      const cw  = getContentWidth(document);          // CSS px 기준 컨텐츠 가로폭
+      const targetMinWidthPx = 3600;                  //  선명도 목표(가로)
+      const maxCanvasDim     = 15000;                 //  안전 상한 (iOS 등 고려)
+      const maxScaleCap      = 4.0;                   //  과도 확대 방지 캡 (안정 범위)
+
+      // DPR 기반 기본값과 '목표 가로 해상도'를 동시에 고려
+      let scale = Math.max(3, dpr, targetMinWidthPx / Math.max(1, cw));
+      scale = Math.min(scale, maxScaleCap);
+
+      // 예상 픽셀 크기 산출 후 안전 상한 내로 조정
       let expW = Math.ceil(cw * scale);
       let expH = Math.ceil(limitBottomCss * scale);
       const worst = Math.max(expW, expH);
       if (worst > maxCanvasDim) {
         const factor = maxCanvasDim / worst;
-        scale = Math.max(1.5, Math.floor((scale * factor) * 100) / 100); // 안전 축소 (하한 1.5)
+        scale = Math.max(2, Math.floor((scale * factor) * 100) / 100); // 과감 축소하되 2배는 유지
       }
       return scale;
     }
@@ -670,27 +677,31 @@
         scrollX:0, scrollY:0,
         windowWidth: getContentWidth(document),
         windowHeight: Math.max(document.documentElement.scrollHeight, document.body.scrollHeight, window.innerHeight),
-        scale: scale,              //  고정 스케일 주입
+        scale: scale,              //  고정 스케일 주입(고화질)
         x: 0, y: 0,
         width: getContentWidth(document),
         onclone: function(clonedDoc){
           try{
+            // 모바일 표시용 transform(.wrap scale .8)을 캡쳐 시 제거  본래 해상도로 렌더링
             clonedDoc.querySelectorAll('.wrap').forEach((el)=>{
               el.style.transform = 'none !important';
               el.style.maxWidth = 'none !important';
               el.style.width = 'auto !important';
             });
+            // 가로 스크롤 영역을 실제 콘텐츠 폭으로 확장
             clonedDoc.querySelectorAll('.table-wrap').forEach((el)=>{
               el.style.overflow = 'visible !important';
               el.style.width = 'auto';
               const w = Math.max(el.scrollWidth, el.clientWidth);
               if (w && w>0) el.style.width = w + 'px';
             });
+            // 문서 폭 보정
             const cw = Math.max(clonedDoc.documentElement.scrollWidth, clonedDoc.body.scrollWidth);
             clonedDoc.documentElement.style.width = cw + 'px';
             clonedDoc.body.style.width = cw + 'px';
             clonedDoc.documentElement.style.overflow = 'visible';
             clonedDoc.body.style.overflow = 'visible';
+            // iOS 채워짐 색 표현 보정
             const fixStyle = clonedDoc.createElement('style');
             fixStyle.textContent = `
 input:disabled, textarea:disabled, select:disabled {
@@ -744,19 +755,19 @@ input[type="checkbox"], input[type="radio"] {
                 const octx = outCanvas.getContext('2d');
                 octx.drawImage(canvas, 0, 0, canvas.width, cropHeightPx, 0, 0, canvas.width, cropHeightPx);
               }
-              outCanvas.toBlob((b)=>{ resolve(b); }, 'image/png', 1.0); // PNG는 무손실, 해상도는 scale로 확보
+              outCanvas.toBlob((b)=>{ resolve(b); }, 'image/png', 1.0); // PNG 무손실
             })
             .catch((err)=>{
-              // iOS Safari 색공간/함수 오류 폴백 (기존 유지)
+              // iOS Safari 색함수 오류 폴백 (기존 유지)
               const msg = (err && (err.message || err)).toString().toLowerCase();
               if(msg.includes('unsupported color function') || msg.includes('color(') || msg.includes('oklab') || msg.includes('oklch') || msg.includes('lch(') || msg.includes('lab(')){
                 const s=document.createElement('script');
                 s.src="https://cdn.jsdelivr.net/npm/html2canvas-pro/dist/html2canvas-pro.min.js";
                 s.async=true;
                 s.onload=function(){
-                  renderWithH2C(document.body, window.__HRA_SCALE__ || 2).then((canvas)=>{
+                  renderWithH2C(document.body, window.__HRA_SCALE__ || 3).then((canvas)=>{
                     backup.forEach((b)=>{ b.el.style.overflow = b.overflow; b.el.style.width = b.width; });
-                    const scale = window.__HRA_SCALE__ || 2;
+                    const scale = window.__HRA_SCALE__ || 3;
                     const cropHeightPx = Math.min(canvas.height, Math.max(1, Math.round(limitBottomCss * scale)));
                     let outCanvas = canvas;
                     if (cropHeightPx > 0 && cropHeightPx < canvas.height) {
@@ -854,7 +865,7 @@ input[type="checkbox"], input[type="radio"] {
       try{
         document.querySelectorAll('thead th.th-center').forEach((th)=>{ th.style.textAlign = 'center'; });
 
-        // (선택) 로컬스토리지 복원
+        // (선택) 로컬스토리지 복원 (기존 유지)
         try{
           const raw=localStorage.getItem("hra-risk-mobile-v3");
           if(raw){
